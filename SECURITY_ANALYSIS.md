@@ -6,16 +6,27 @@
 
 ---
 
+## 零、已修復項目
+
+以下風險已在本次提交中修復：
+
+| 原等級 | 項目 | 修復方式 |
+|--------|------|----------|
+| ~~高~~ → 已修復 | Token 明文儲存 | 改用 `env.ACE_TOOL_TOKEN` 環境變數傳遞，不再寫入 CLI args |
+| ~~低~~ → 已修復 | ROLE_FILE 路徑讀取 | 新增家目錄限制 + symlink 解析防護 |
+
+---
+
 ## 一、總體評估
 
-**結論：此程式碼庫整體安全，適合使用。** 未發現嚴重漏洞，但有幾個中等風險項目需注意。
+**結論：此程式碼庫整體安全，適合使用。** 主要風險已修復，剩餘為中等風險項目。
 
 | 等級 | 數量 | 說明 |
 |------|------|------|
 | 嚴重 (Critical) | 0 | 無 |
-| 高風險 (High) | 1 | Token 明文儲存 |
+| 高風險 (High) | 0 | Token 明文儲存 → **已修復** |
 | 中風險 (Medium) | 2 | 二進位供應鏈信任、npm 依賴 |
-| 低風險 (Low) | 2 | Shell RC 修改、ROLE_FILE 路徑讀取 |
+| 低風險 (Low) | 1 | Shell RC 修改（已有重複檢測） |
 
 ---
 
@@ -36,31 +47,32 @@
 
 ## 三、風險詳細分析
 
-### 3.1 高風險：Token 明文儲存於 ~/.claude.json
+### 3.1 ~~高風險~~ 已修復：Token 明文儲存於 ~/.claude.json
 
-**位置**: `src/utils/installer.ts:812-813`
+**位置**: `src/utils/installer.ts` — `installAceTool()`
 
-當使用者選擇安裝 ace-tool MCP 時，API token 以 CLI 參數形式寫入：
+**修復前**：Token 以 CLI 參數形式寫入 `--token YOUR_TOKEN`，暴露於 process list 和配置檔。
+
+**修復後**：Token 改用 `env` 欄位傳遞，MCP 配置變為：
 
 ```json
 {
   "mcpServers": {
     "ace-tool": {
       "command": "npx",
-      "args": ["-y", "ace-tool@latest", "--token", "使用者的TOKEN在此"]
+      "args": ["-y", "ace-tool@latest"],
+      "env": {
+        "ACE_TOOL_TOKEN": "使用者的TOKEN在此"
+      }
     }
   }
 }
 ```
 
-**風險**:
-- 任何以該使用者身份執行的程序都可讀取 token
-- `ps aux | grep ace-tool` 可在 process list 中看到 token
-- 無加密保護
-
-**建議**:
-- 改用環境變數傳遞 token（如 `ACE_TOOL_TOKEN`）
-- 或使用作業系統的 credential manager
+**改善**:
+- Token 不再出現在 `ps aux` process list 中
+- 環境變數僅對子程序可見，不暴露於命令列
+- `~/.claude.json` 仍含 token（MCP 設計限制），建議保護家目錄權限
 
 ### 3.2 中風險：預編譯二進位的供應鏈信任
 
@@ -99,11 +111,17 @@ export PATH="~/.claude/bin:$PATH"
 - 多次執行可能產生重複條目
 - 需使用者明確確認
 
-### 3.5 低風險：ROLE_FILE 路徑讀取
+### 3.5 ~~低風險~~ 已修復：ROLE_FILE 路徑讀取
 
-**位置**: `codeagent-wrapper/utils.go:72-111`
+**位置**: `codeagent-wrapper/utils.go` — `injectRoleFile()`
 
-Go wrapper 允許透過 `ROLE_FILE:` 指令讀取任意檔案，未限制於家目錄。此為設計意圖（讓使用者載入自訂角色檔案），但可考慮加入路徑限制。
+**修復前**：允許透過 `ROLE_FILE:` 指令讀取任意檔案路徑，無限制。
+
+**修復後**：新增安全檢查：
+- 解析絕對路徑 (`filepath.Abs`)
+- 解析 symlink (`filepath.EvalSymlinks`) 防止符號連結繞過
+- 驗證最終路徑位於使用者家目錄內
+- 拒絕家目錄外的路徑並記錄警告
 
 ---
 

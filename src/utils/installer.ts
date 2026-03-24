@@ -809,8 +809,12 @@ export async function installAceTool(config: AceToolConfig): Promise<{ success: 
     if (baseUrl) {
       args.push('--base-url', baseUrl)
     }
+
+    // Security: pass token via environment variable instead of CLI args
+    // This prevents token exposure in process list (ps aux) and config file
+    const env: Record<string, string> = {}
     if (token) {
-      args.push('--token', token)
+      env.ACE_TOOL_TOKEN = token
     }
 
     // Create base ace-tool MCP server config
@@ -818,6 +822,7 @@ export async function installAceTool(config: AceToolConfig): Promise<{ success: 
       type: 'stdio' as const,
       command: 'npx',
       args,
+      ...(Object.keys(env).length > 0 ? { env } : {}),
     })
 
     // Merge new server into existing config
