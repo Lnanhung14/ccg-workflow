@@ -87,13 +87,30 @@ func injectRoleFile(taskText string) (string, error) {
 		filePath := strings.TrimSpace(submatches[1])
 
 		// Expand ~ to home directory
+		home, err := os.UserHomeDir()
+		if err != nil {
+			logWarn(fmt.Sprintf("Failed to get home directory: %v", err))
+			return match
+		}
 		if strings.HasPrefix(filePath, "~/") {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				logWarn(fmt.Sprintf("Failed to get home directory: %v", err))
-				return match
-			}
 			filePath = filepath.Join(home, filePath[2:])
+		}
+
+		// Security: resolve symlinks and ensure path stays within home directory
+		absPath, err := filepath.Abs(filePath)
+		if err != nil {
+			logWarn(fmt.Sprintf("Failed to resolve ROLE_FILE path '%s': %v", filePath, err))
+			return match
+		}
+		// Evaluate symlinks to prevent symlink-based path traversal
+		resolvedPath, err := filepath.EvalSymlinks(absPath)
+		if err != nil {
+			// File may not exist yet; fall through to ReadFile which will error
+			resolvedPath = absPath
+		}
+		if !strings.HasPrefix(resolvedPath, home+string(filepath.Separator)) && resolvedPath != home {
+			logWarn(fmt.Sprintf("ROLE_FILE '%s' is outside home directory, rejecting for security", filePath))
+			return match
 		}
 
 		// Read file content
